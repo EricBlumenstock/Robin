@@ -1,42 +1,67 @@
 from Robinhood.Robinhood import Robinhood
+from alpha_vantage.techindicators import TechIndicators
+from sys import argv
+import settings
 
 rh = Robinhood()
-RESET = '\u001b[0m'
-BOLD = '\u001b[1m'
-UNDERLINE = '\u001b[4m'
-RED = '\u001b[1;31;40m'
-REDBG = '\u001b[7;31;40m'
-GREEN = '\u001b[1;32;40m'
-GREENBG = '\u001b[7;32;40m'
-WHITEBG = '\u001b[7;33;40m'
-def color_print(color, item : str):
-    print(color + item + RESET)
+ti = TechIndicators(key=settings.alphavantage_key)
+stocksymbols = [str(i) for i in argv[1:]]
 
-width = 43
-header = str('\u2502' + ' {:^7} \u2502'*4).format(' Symbol', 'Price', 'Ask', 'Bid').center(width)
-color_print(WHITEBG, header)
+def main():
+    quotes = []
+    for i in stocksymbols:
+        quotes.append(Symbol(i))
 
-stocks =  [rh.quote_data('TQQQ'), rh.quote_data('UDOW')]
-for i in stocks:
-    print(str('\u2502 {:^7} \u2502' + ' {:^7.2f} \u2502'*3).format(i['symbol'], float(i['last_trade_price']) ,float(i['ask_price']), float(i['bid_price'])).center(width))
-#Yesterday's mean moving avg
-#Today's mean moving avg so far
-#Tick history
-#Tick summary amount for history
-#Color numbers green/red according to whether number went higher or lower compared to last, white if same
-#Mark extreme gain/losses
-#Sentiment
-print('\u2501'*width)
+    for q in quotes:
+        print(q.table())
 
-def print_format_table():
-    """
-    prints table of formatted text format options
-    """
-    for style in range(8):
-        for fg in range(30,38):
-            s1 = ''
-            for bg in range(40,48):
-                format = ';'.join([str(style), str(fg), str(bg)])
-                s1 += '\x1b[%sm %s \x1b[0m' % (format, format)
-            print(s1)
-        print('\n')
+class Symbol:
+    def __init__(self, symbol):
+        self.symbol = symbol
+        self.sma_short_time=10
+        self.sma_long_time=60
+        self.rsi_time=10
+        self.quote = None
+        self.LTP = None
+        self.ask_price = None
+        self.bid_price = None
+        self.ask_size = None
+        self.bid_size = None
+        self.macd = None
+        self.macd_computed = None
+        self.rsi = None
+        self.refresh()
+
+    def refresh(self):
+        self.quote = rh.quote_data(self.symbol)
+        self.LTP = self.quote['last_trade_price']
+        self.ask_price = self.quote['ask_price']
+        self.bid_price = self.quote['bid_price']
+        self.ask_size = str(self.quote['ask_size'])
+        self.bid_size = str(self.quote['bid_size'])
+        self.macd = self.call_macd()
+        self.macd_computed = self.computed_macd_signal_diff()
+        self.rsi = self.call_rsi(self.rsi_time)
+
+    def call_sma(self, timeperiod) -> float:
+        return [i['SMA'] for i in ti.get_sma(symbol=self.symbol, interval='1min', time_period=str(timeperiod))[0].values()][0]
+
+    def call_macd(self) -> {}:
+        macd = [i for i in ti.get_macd(symbol=self.symbol, interval='1min',fastperiod=12, slowperiod=26, signalperiod=9)[0].values()][0]
+        return macd
+
+    def call_rsi(self, timeperiod) -> float:
+        rsi = [i['RSI'] for i in ti.get_rsi(symbol=self.symbol, interval='1min', time_period=str(timeperiod))[0].values()][0]
+        return rsi
+    
+    def computed_macd_signal_diff(self) -> float:
+        return abs((float(self.macd['MACD_Signal'])) - abs(float(self.macd['MACD'])))
+
+    def table(self) -> str:
+        return 'Symbol: {symbol}\r\nLTP: {ltp}\r\nSell: {ask_price} ({ask_size})\r\nBuy: {bid_price} ({bid_size})\r\nMACD: {macddiff}\r\nRSI: {rsi}'\
+            .format(symbol=self.symbol, ltp=self.LTP, ask_price=self.ask_price, ask_size=self.ask_size,
+            bid_price=self.bid_price, bid_size=self.bid_size, macddiff=self.macd_computed, rsi=self.rsi)
+
+
+if __name__ == '__main__':
+    main()
